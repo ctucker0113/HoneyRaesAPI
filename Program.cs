@@ -226,4 +226,15 @@ app.MapGet("/unassignedTickets", () =>
     return Results.Ok(filteredServiceTickets);
 });
 
+app.MapGet("/inactiveCustomers", () =>
+{
+    var oneYearAgo = DateTime.Now.AddYears(-1);
+    var filteredCustomers = serviceTickets
+    // Find all tickets that are more than a year old.
+    .Where(st => st.DateCompleted != null && st.DateCompleted.Value <= oneYearAgo);
+
+
+    // 
+} );
+
 app.Run();
