@@ -37,6 +37,13 @@ List<Employee> employees = new List<Employee>
         ID = 2,
         Name = "Fred Weasley",
         Specialty = "Practical Jokes"
+    },
+
+    new Employee()
+    {
+        ID = 3,
+        Name = "Johnny Tight Lips",
+        Specialty = "Not saying nothing"
     }
 };
 
@@ -47,7 +54,7 @@ List<ServiceTicket> serviceTickets = new List<ServiceTicket>
         ID = 1,
         CustomerID = 1,
         Description = "Car done blowed up",
-        Emergency = true,
+        Emergency = false,
     },
 
     new ServiceTicket()
@@ -57,7 +64,7 @@ List<ServiceTicket> serviceTickets = new List<ServiceTicket>
         EmployeeID = 1,
         Description = "Wheel fell off",
         Emergency = false,
-        DateCompleted = new DateTime (2023, 10, 15)
+        DateCompleted = new DateTime (2024, 1, 15)
     },
 
     new ServiceTicket()
@@ -67,6 +74,7 @@ List<ServiceTicket> serviceTickets = new List<ServiceTicket>
         EmployeeID = 1,
         Description = "Steering Wheel exploded",
         Emergency = false,
+        DateCompleted = new DateTime(2024, 1, 17)
     },
 
     new ServiceTicket()
@@ -76,7 +84,7 @@ List<ServiceTicket> serviceTickets = new List<ServiceTicket>
         EmployeeID = 2,
         Description = "Passenger side door eaten by raccoons",
         Emergency = true,
-        DateCompleted = new DateTime (2023, 6, 7)
+        DateCompleted = new DateTime (2022, 6, 7)
     },
 
     new ServiceTicket()
@@ -85,8 +93,25 @@ List<ServiceTicket> serviceTickets = new List<ServiceTicket>
         CustomerID = 3,
         Description = "Gas tank is empty",
         Emergency = false,
-        DateCompleted = new DateTime (2023, 4, 10)
+        DateCompleted = new DateTime (2022, 4, 10)
     },
+
+    new ServiceTicket()
+    {
+        ID = 6,
+        CustomerID = 3,
+        Description = "KABOOM!",
+        Emergency = true,
+    },
+
+    new ServiceTicket()
+    {
+        ID = 7,
+        CustomerID = 2,
+        Description = "Sharalandah",
+        Emergency = false,
+        EmployeeID = 1,
+    }
 };
 
 var builder = WebApplication.CreateBuilder(args);
@@ -228,13 +253,108 @@ app.MapGet("/unassignedTickets", () =>
 
 app.MapGet("/inactiveCustomers", () =>
 {
-    var oneYearAgo = DateTime.Now.AddYears(-1);
-    var filteredCustomers = serviceTickets
-    // Find all tickets that are more than a year old.
-    .Where(st => st.DateCompleted != null && st.DateCompleted.Value <= oneYearAgo);
+    var inactiveCustomers = customers.Where(customer =>
+    {
+        var customerTickets = serviceTickets.Where(st => st.CustomerID == customer.ID && st.DateCompleted.HasValue).ToList();
+
+        if (!customerTickets.Any())
+        {
+            // No tickets, consider inactive
+            return true;
+        }
+
+        var lastTicketDate = customerTickets.Max(st => st.DateCompleted.Value);
+        return (DateTime.Today - lastTicketDate).Days > 365;
+    }).ToList();
+
+    return Results.Ok(inactiveCustomers);
+});
 
 
-    // 
-} );
+app.MapGet("/availableEmployees", () =>
+{
+    // Filter out tickets that have been completed.
+    var incompleteTickets = serviceTickets.Where(st => st.DateCompleted == null);
+
+    // Create a new list of all employees attached to the unassigned tickets.
+    var assignedEmployees = incompleteTickets
+    // Filter out any tickets that don't have an employee assigned
+                            .Where(st => st.EmployeeID.HasValue)
+    // Pull out the Employee ID values into a new list.
+                            .Select(st => st.EmployeeID.Value)
+    // Prevent any duplicate Employee ID's from making it into the list.
+                            .Distinct();
+
+    var availableEmployees = employees
+    // If the employee is NOT in the assignedEmployees array (and therefore free), add them to this list.
+                            .Where(e => !assignedEmployees.Contains(e.ID))
+                            .ToList();
+
+    return Results.Ok(availableEmployees);
+});
+
+app.MapGet("/allCustomersOfAnEmployee/{employeeID}", (int employeeID) =>
+{
+    // Find all the service tickets attached to a single employeeID
+    var allCustomerIDsOfAnEmployee = serviceTickets
+                                   .Where(e => e.EmployeeID == employeeID)
+    // Pull the customerID's on those tickets. 
+                                   .Select(e => e.CustomerID)
+    // Filter out duplicates.
+                                   .Distinct();
+
+
+    var associatedCustomers = customers
+    // Find all the objects in the customers list that contain the ID numbers in the list created above.
+                              .Where(e => allCustomerIDsOfAnEmployee.Contains(e.ID))
+                              .ToList();
+
+    return Results.Ok(associatedCustomers);
+
+});
+
+app.MapGet("/employeeOfTheMonth", () =>
+{
+    // Define the start and end dates for the last month
+    var endDate = DateTime.Today;
+    var startDate = new DateTime(endDate.Year, endDate.Month, 1).AddMonths(-1);
+
+    // Filter the service tickets down to just tickets that have been completed in the last month
+    var lastMonthTickets = serviceTickets.Where(st => st.DateCompleted.HasValue && st.DateCompleted.Value >= startDate && st.DateCompleted.Value < endDate);
+
+    // Count the number of tickets per employee
+    var employeeTicketCounts = lastMonthTickets
+    // Establishes EmployeeID as the group key.
+                                .GroupBy(st => st.EmployeeID)
+                                .Select(group => new
+                                {
+                                    EmployeeID = group.Key,
+                                    TicketCount = group.Count()
+                                })
+                                .ToList();
+
+    // Find the employee with the most tickets completed
+    var maxTickets = employeeTicketCounts.MaxBy(e => e.TicketCount);
+
+    // Fetch the details of this employee
+    var employeeOfTheMonth = employees.FirstOrDefault(e => e.ID == maxTickets.EmployeeID);
+
+    return employeeOfTheMonth != null ? Results.Ok(employeeOfTheMonth) : Results.NotFound("No employee of the month found.");
+});
+
+app.MapGet("/completedTicketsList", () =>
+{
+    // Filter out the incomplete tickets
+    var completedTickets = serviceTickets.Where(e => e.DateCompleted != null).OrderBy(e => e.DateCompleted);
+    return completedTickets;
+
+});
+
+app.MapGet("/prioritizedTickets", () =>
+{
+    var prioritizedTickets = serviceTickets.Where(e => e.DateCompleted == null).OrderByDescending(e => e.Emergency).ThenBy(e => e.EmployeeID);
+
+    return prioritizedTickets;
+});
 
 app.Run();
